@@ -38,32 +38,38 @@ The most important design decision was making the boundary a structural test rat
 
 **Source:** Manual collection from r/movies Official Discussion threads. I originally planned to use PRAW to scrape via Reddit's API, but Reddit's Responsible Builder Policy (Nov 2025) now requires manual review for all API access, and the old `.json` URL workaround was closed in May 2026. So I browsed Reddit directly and copied comments by hand.
 
-**Films sampled:** 6 films chosen for varied reception, so no single label would dominate:
+**Films sampled:** 6 films chosen for varied reception and genre, so no single label would dominate:
 
-| Film | Reception profile |
-|---|---|
-| Scream 7 | Franchise sequel, mixed reception |
-| THE BRIDE! | Sharply divisive |
-| The Drama | Topical, polarizing subject matter |
-| Project Hail Mary | Broadly acclaimed |
-| Hoppers | Well-reviewed with some pushback |
-| Ella McCay | Mixed critical reception |
+| Film | Rows | Reception profile |
+|---|---|---|
+| Scream 7 | 29 | Franchise sequel, mixed reception |
+| THE BRIDE! | 30 | Sharply divisive |
+| The Drama | 36 | Topical, polarizing subject matter |
+| Project Hail Mary | 23 | Broadly acclaimed |
+| Hoppers | 47 | Well-reviewed with some pushback |
+| Michael | 47 | Mixed critical reception (40% RT, 96% audience) |
 
-If I'd only pulled from a beloved film like Project Hail Mary, the dataset would skew heavily toward `analysis` because people want to explain why it worked. Mixing in divisive films brought in more `hot_take` and `reaction` examples.
-
-**Process:** Sorted each thread by Top, copied comments row-by-row, skipped AutoModerator posts, deleted/removed comments, and emoji-only or single-word entries.
+**Process:** Sorted each thread by Top, copied comments row-by-row, skipped AutoModerator posts, deleted/removed comments, and emoji-only or single-word entries that couldn't be labeled without reply context.
 
 **Label distribution:**
 
 | Label | Total | Train | Val | Test |
 |---|---|---|---|---|
-| `hot_take` | 91 | 63 | 14 | 14 |
-| `analysis` | 57 | 40 | 8 | 9 |
-| `reaction` | 34 | 24 | 5 | 5 |
-| `noise` | 23 | 16 | 4 | 3 |
-| **Total** | **205** | **143** | **31** | **31** |
+| `analysis` | 124 | 87 | 18 | 19 |
+| `hot_take` | 50 | 35 | 8 | 7 |
+| `reaction` | 31 | 22 | 5 | 4 |
+| `noise` | 7 | 5 | 1 | 1 |
+| **Total** | **212** | **148** | **32** | **31** |
 
-I used stratified splits (70/15/15) so minority classes like `noise` and `reaction` would actually appear in the test set.
+I used stratified splits (70/15/15) so all four labels appear in each split.
+
+**What the distribution actually reflects:** Going in, I expected `hot_take` to dominate — casual movie discussion usually skews toward unsupported verdicts. The actual dataset flipped that assumption. `analysis` is 58% of the total, and `noise` nearly disappeared (only 7 rows). Both are real findings about where the data came from, not labeling errors.
+
+Official Discussion threads self-select for substantive engagement. People who sort by Top and post early on a film discussion are usually there to explain a reaction, not just state it. `hot_take` comments ("loved it," "best Pixar ever") exist but get fewer upvotes and end up lower in the sort — they're harder to find when you're copying from the top of the thread. `noise` is even rarer because r/movies moderates aggressively and logistical comments get removed or buried.
+
+Thread type also matters within the dataset. The Scream 7 and THE BRIDE! early rows came from review aggregator threads before the films were widely seen — those produced more pre-screening `noise` and verdict-style `hot_take` comments. The Official Discussion threads for the same films after release produced almost entirely `analysis` and `reaction`. If I were collecting again, I'd pull exclusively from Official Discussion threads and add more films to increase `hot_take` and `noise` coverage.
+
+The Michael biopic is the most analysis-heavy film in the dataset (36 of 47 rows, or 77%). Biopic discourse naturally involves comparing specific scenes to historical record, counting what was omitted, and debating what the film should have covered — all of which label as `analysis` under the decision procedure. The film's extreme critic/audience score gap (40% RT vs. 96% audience) also generated unusually detailed comments from people trying to explain the gap, which skews analytical.
 
 ---
 
@@ -94,7 +100,7 @@ The word "smart" reads like a verdict, but there's a specific structural claim h
 | `warmup_steps` | 50 | Prevents large gradient updates while the classification head initializes. |
 | `weight_decay` | 0.01 | Light regularization against overfitting. |
 
-One thing I didn't do but should have: class weights. With `hot_take` at 44% of training examples and `noise` at 11%, the model never had enough signal to learn the minority classes properly.
+One thing I didn't do but should have: class weights. With `analysis` at 58% of training examples and `noise` at 3%, the model never had enough signal to learn the minority classes properly.
 
 ---
 
@@ -104,10 +110,10 @@ One thing I didn't do but should have: class weights. With `hot_take` at 44% of 
 
 | Model | Accuracy | Test set size |
 |---|---|---|
-| Zero-shot baseline (Llama 3.3 70B via Groq) | **90.3%** | 31 |
-| Fine-tuned DistilBERT | **71.0%** | 31 |
+| Zero-shot baseline (Llama 3.3 70B via Groq) | **78.1%** | 32 |
+| Fine-tuned DistilBERT | **62.5%** | 32 |
 
-Fine-tuning **regressed** by 19.4 points. That's the main result and I address it directly in the reflection below.
+Fine-tuning **regressed** by 15.6 points. That's the main result and I address it directly in the reflection below.
 
 ---
 
@@ -117,21 +123,21 @@ Fine-tuning **regressed** by 19.4 points. That's the main result and I address i
 
 | Label | Precision | Recall | F1 | Support |
 |---|---|---|---|---|
-| `analysis` | 0.89 | 0.89 | 0.89 | 9 |
-| `hot_take` | 0.64 | 1.00 | 0.78 | 14 |
-| `reaction` | 0.00 | 0.00 | 0.00 | 5 |
-| `noise` | 0.00 | 0.00 | 0.00 | 3 |
-| **weighted avg** | **0.57** | **0.71** | **0.61** | **31** |
+| `analysis` | 0.63 | 1.00 | 0.77 | 19 |
+| `hot_take` | 0.50 | 0.13 | 0.20 | 8 |
+| `reaction` | 0.00 | 0.00 | 0.00 | 4 |
+| `noise` | 0.00 | 0.00 | 0.00 | 1 |
+| **weighted avg** | **0.51** | **0.63** | **0.52** | **32** |
 
 **Zero-shot baseline — Llama 3.3 70B:**
 
 | Label | Precision | Recall | F1 | Support |
 |---|---|---|---|---|
-| `analysis` | 0.89 | 0.89 | 0.89 | 9 |
-| `hot_take` | 0.92 | 0.86 | 0.89 | 14 |
-| `reaction` | 0.83 | 1.00 | 0.91 | 5 |
-| `noise` | 1.00 | 1.00 | 1.00 | 3 |
-| **weighted avg** | **0.91** | **0.90** | **0.90** | **31** |
+| `analysis` | 1.00 | 0.68 | 0.81 | 19 |
+| `hot_take` | 0.64 | 0.88 | 0.74 | 8 |
+| `reaction` | 0.67 | 1.00 | 0.80 | 4 |
+| `noise` | 0.50 | 1.00 | 0.67 | 1 |
+| **weighted avg** | **0.85** | **0.78** | **0.79** | **32** |
 
 ---
 
@@ -139,48 +145,50 @@ Fine-tuning **regressed** by 19.4 points. That's the main result and I address i
 
 |  | Predicted: `analysis` | Predicted: `hot_take` | Predicted: `reaction` | Predicted: `noise` |
 |---|---|---|---|---|
-| **True: `analysis`** | **8** | 1 | 0 | 0 |
-| **True: `hot_take`** | 0 | **14** | 0 | 0 |
-| **True: `reaction`** | 0 | 5 | **0** | 0 |
-| **True: `noise`** | 1 | 2 | 0 | **0** |
+| **True: `analysis`** | **19** | 0 | 0 | 0 |
+| **True: `hot_take`** | 7 | **1** | 0 | 0 |
+| **True: `reaction`** | 3 | 1 | **0** | 0 |
+| **True: `noise`** | 1 | 0 | 0 | **0** |
 
-The model never predicted `reaction` or `noise` for any example in the test set. Everything collapsed into `hot_take`.
+The model never predicted `reaction` or `noise` for any example. It got every `analysis` correct but almost nothing else — essentially functioning as an `analysis` vs. everything-else detector, and then defaulting `everything-else` to `analysis` as well.
 
 ---
 
 ### Error Analysis
 
-There were 9 wrong predictions out of 31. Before writing this section, I pasted all 9 into Claude and asked it to find common patterns. It flagged three things: all 9 had nearly identical low confidence scores (0.30–0.32); 8 of 9 predictions were `hot_take` regardless of the true label; and the `noise` errors both had evaluative-sounding language in them. Claude also suggested errors might cluster around short post length — I checked and that didn't hold up, since error #5 (the `analysis` case) is one of the longer comments in the test set. The confidence and `hot_take` default observations were accurate and shaped the analysis below.
+There were 12 wrong predictions out of 32. Before writing this section, I pasted all 12 into Claude and asked it to find common patterns. It flagged three: all 12 had uniformly low confidence (0.30–0.39), pointing to genuine uncertainty rather than confident errors; 7 of 12 were `hot_take → analysis`, making that the single dominant failure mode; and several of the `hot_take` errors contained comparative or relational language ("Felt like a Joe Jackson movie," "Reminded me of Goofy Movie") that may have pattern-matched to `analysis` because analysis comments also frequently reference other films. Claude also suggested errors might cluster around comment length — shorter comments being misclassified more — but that didn't hold up on inspection since several multi-sentence `hot_take` comments were also wrong. The directional bias and the comparative language observation both held and shaped the analysis below.
 
-**Error type 1: `reaction` → `hot_take` (5 errors — the main failure)**
-
-Examples:
-- "The moment the letter arrived and she just put it down and walked away without opening it. I understood her completely in that instant." → predicted `hot_take` (0.31)
-- "The moment he realized what Rocky was sacrificing and just said his name. I couldn't breathe." → predicted `hot_take` (0.31)
-- "When the solution clicked into place I actually stood up. In the theater. By myself." → predicted `hot_take` (0.32)
-- "The final shot absolutely destroyed me." → predicted `hot_take` (0.31)
-
-**Which labels are confused?** All five `reaction` examples in the test set were predicted as `hot_take`. The model learned `hot_take` as a default and never predicted `reaction` at all.
-
-**Why is the boundary hard?** The emotional language in `reaction` comments ("destroyed me," "I couldn't breathe") looks a lot like the emotional language in strong `hot_take` comments ("carried this entire movie," "best of the year"). The actual boundary — whether the feeling is about one moment or the film overall — lives in the noun phrase, not the sentiment. "The final shot destroyed me" vs. "This movie destroyed me" differ by one word.
-
-**Is this a labeling or data problem?** The labeling is consistent — all five belong in `reaction` under the decision procedure. The problem is that 24 training examples isn't enough for the model to learn a boundary that depends on semantic reference rather than vocabulary.
-
-**What would fix it?** More `reaction` examples, specifically ones where the only difference from a `hot_take` is the scope of what's being referenced. Class weights during training would also help.
-
-**Error type 2: `noise` → `hot_take` (2 errors)**
+**Error type 1: `hot_take` → `analysis` (7 errors — the dominant failure)**
 
 Examples:
-- "What award circuit is this targeting? Oscars or more of a festival film?" → predicted `hot_take` (0.30)
-- "Is the runtime really 2h20? Feels long for this kind of film." → predicted `hot_take` (0.31)
+- "Hope they put the franchise on ice after this and sell off the rights to a better studio." → predicted `analysis` (0.33)
+- "Felt like a Joe Jackson movie more than a Michael movie" → predicted `analysis` (0.32)
+- "Watching certain scream subs get defensive told me this was probably a stinker. That's a shame scream was wildly consistent too" → predicted `analysis` (0.35)
+- "BRO Rachel was a villain I am so glad I saw this. The actress did a great job at making me hate her." → predicted `analysis` (0.39)
+- "Justice for the classroom turtle! Absolutely loved this movie. Reminds me of Goofy Movie. So funny, yet so heartwarming." → predicted `analysis` (0.37)
 
-Both contain evaluation-adjacent language — asking about awards implies quality; "feels long" sounds like a complaint. The model isn't entirely wrong to detect that, and these are two of the harder `noise` cases I documented during annotation. The distinction is communicative function: are they evaluating the film or asking a question? The model can't figure that out without pragmatic inference.
+**Which labels are confused?** `hot_take → analysis` accounts for 7 of 12 errors and is entirely directional. The model predicted `analysis` 30 out of 32 times — it learned `analysis` as a near-universal default.
 
-**Error type 3: `analysis` → `hot_take` (1 error)**
+**Why is the boundary hard?** The training set is 58% `analysis`, so the model learned `analysis` vocabulary as the baseline signal for anything that isn't clearly neutral. Several of these misclassified `hot_take` comments contain comparative language ("Felt like a Joe Jackson movie," "Reminded me of Goofy Movie") — which is also common in `analysis` comments that compare a film to a director's earlier work or to genre peers. The model can't distinguish "this film reminded me of X" as a comparison-as-evidence from "this film reminded me of X" as a casual verdict.
 
-Example: "The meta-commentary about franchise fatigue was smart until it kept repeating itself every fifteen minutes. Once is self-aware. Four times is the exact thing it's criticizing." → predicted `hot_take` (0.30)
+**Is this a labeling or data problem?** The labeling is consistent — all seven belong in `hot_take` under the decision procedure (none cite a checkable film detail). The problem is training data imbalance: with 86 `analysis` examples in training vs. 35 `hot_take`, the model tipped heavily toward the majority class.
 
-The word "smart" in the opening clause patterns like a `hot_take` verdict. The specific structural evidence comes after it. The model seems to classify based on the first sentence rather than reading the whole comment — a shortcut that works most of the time but breaks when the evidence comes later.
+**What would fix it?** More `hot_take` examples and class weights during training. Class weights would penalize `analysis` predictions more when the true label is `hot_take`, preventing the majority class from dominating the learned boundary.
+
+**Error type 2: `reaction` → `analysis` (3 errors)**
+
+Examples:
+- "It made me feel sad when Emma day dreamed about Charlie laughing with her and comforting her the morning after. Then the snap to reality of the 2 on completely different chairs." → predicted `analysis` (0.35)
+- "The abrupt cut to the photographer repeatedly saying who they needed to shoot had my whole theater going nuts." → predicted `analysis` (0.35)
+- "Did not expect this movie to have a body count" → predicted `analysis` (0.30)
+
+These reaction comments all describe specific scenes in enough detail that they pattern-match to `analysis`. "The abrupt cut to the photographer" names a specific editing technique; "Emma day dreamed about Charlie" names a specific scene. The model appears to key on scene-specificity as an `analysis` signal regardless of whether the comment is making a claim about it or just reacting to it. This is a surface-feature failure: it detected the right textual marker (scene reference) but not the right function (reaction vs. argument).
+
+**Error type 3: `noise` → `analysis` (1 error), `reaction` → `hot_take` (1 error)**
+
+"Time to use my free trial of MGM+ I guess and promptly cancel after watching." → predicted `analysis` (0.33). This is a pre-screening logistics comment — the commenter hasn't seen the film and is commenting on streaming access. It contains no film evaluation whatsoever. The model's `analysis` prediction here is difficult to explain by surface features alone; it may be that "cancel after watching" read as a negative verdict pattern.
+
+"All I want now, is a rocky friend 😢😢😭" → predicted `hot_take` (0.30). The emoji carry emotional weight but no verdict; the comment is a feeling about a character, not an overall quality judgment. This is the `reaction`/`hot_take` boundary failure from the previous run re-appearing with a single example.
 
 ---
 
@@ -188,23 +196,25 @@ The word "smart" in the opening clause patterns like a `hot_take` verdict. The s
 
 | Text (truncated) | True label | Predicted | Confidence |
 |---|---|---|---|
-| "The kills in this one actually felt choreographed for once — the kitchen scene used the geography of the house..." | `analysis` | `analysis` | 0.71 |
-| "Best Scream since 2." | `hot_take` | `hot_take` | 0.68 |
-| "When the twist landed I grabbed my boyfriend so hard he yelped." | `reaction` | `hot_take` | 0.31 |
-| "Is this connected to the other franchise?" | `noise` | `analysis` | 0.31 |
-| "Devastating. Cannot recommend it enough." | `hot_take` | `hot_take` | 0.65 |
+| "What was so frustrating to me was the way the movie would present some great feminist ideas and then shrink away..." | `analysis` | `analysis` | 0.68 |
+| "Truly a bizarre mix of tones." | `hot_take` | `hot_take` | 0.52 |
+| "Felt like a Joe Jackson movie more than a Michael movie" | `hot_take` | `analysis` | 0.32 |
+| "The abrupt cut to the photographer repeatedly saying who they needed to shoot had my whole theater going nuts." | `reaction` | `analysis` | 0.35 |
+| "Time to use my free trial of MGM+ I guess and promptly cancel after watching." | `noise` | `analysis` | 0.33 |
 
-The `analysis` prediction makes sense — "the kitchen scene used the geography of the house" is a named scene with a specific filmmaking observation, which is exactly what the label requires. The model's 0.71 confidence is noticeably higher than any of the wrong predictions (all 0.30–0.32), which were basically at chance for a four-class problem. The model isn't confidently wrong — it's uncertain on everything it misclassifies.
+The `analysis` prediction on the Bride! feminist critique comment makes sense — it names specific plot points, character behavior across acts, and structural problems, which is exactly the `analysis` pattern. The 0.68 confidence is higher than any wrong prediction, consistent with the model being more certain when the label is `analysis`. The correct `hot_take` ("Truly a bizarre mix of tones") is notable because it's short, unambiguous, and contains no film-specific details — the model's one reliable `hot_take` prediction. Everything else collapses into `analysis` at low confidence.
 
 ---
 
 ### Reflection: What the Model Captured vs. What Was Intended
 
-I designed the labels around a structural distinction: does this comment give evidence, and if not, is it about a moment or the whole film? That's a question about what the comment is *pointing at*, not what vocabulary it uses.
+The intended boundary was structural: does this comment give evidence, and if not, is it about a moment or the whole film? That's a question about what the comment is *pointing at*, not what words it uses.
 
-What the model learned was simpler: does this comment contain evaluative language? That actually works for separating `analysis` from `hot_take` — analysis comments tend to use descriptive language about specific scenes, while `hot_take` comments use sentiment language about the film overall. But it completely breaks for `reaction` and `noise`, where the evaluative language is present but the function is different.
+What the model learned was simpler: is this comment structured like the majority of what I was trained on? With 58% of training data being `analysis`, the model learned to treat `analysis` as the default response for any comment that isn't immediately obvious. It got every `analysis` example right (19/19, 100% recall) but only 1/8 `hot_take` and 0/4 `reaction` — not because those classes are harder, but because it stopped trying to distinguish them.
 
-The gap between 71% and 90% accuracy isn't really a hyperparameter problem. A 70B instruction-tuned model can follow a prompt that says "reaction means a feeling about one specific moment" and apply it correctly. A 66M model fine-tuned on 143 examples learns word co-occurrence, not semantic reference. The labels are learnable — the baseline proves that — but not by this model from this much data.
+This is the same problem as the previous run, just flipped. In the earlier version of the dataset, `hot_take` was 44% of training data and the model defaulted to `hot_take`. In this dataset, `analysis` is 58% and the model defaults to `analysis`. In both cases, the model learned the majority class distribution rather than the actual label boundaries. The boundary that matters — whether a comment gives evidence, and whether its scope is a moment or the whole film — is a semantic and referential distinction that a 66M parameter model fine-tuned on ~150 examples cannot learn from word co-occurrence alone.
+
+The baseline at 78.1% does better on every non-`analysis` class because a 70B instruction-tuned model can actually follow the definitions in the prompt. The labels are learnable — the baseline proves it — but not by a small model from this data volume and this class imbalance.
 
 ---
 
@@ -212,7 +222,7 @@ The gap between 71% and 90% accuracy isn't really a hyperparameter problem. A 70
 
 **Where the spec helped:** The instruction to write labels so "two people would agree on most examples" directly pushed me away from the first taxonomy draft, which separated `hot_take` from a "hyperbolic/bait" category based on tone intensity. That's a judgment call two people would never apply the same way. Switching to a structural test eliminated that.
 
-**Where I diverged:** The spec assumes API scraping is the data collection path — the PRAW setup instructions are in the project guide. Reddit killed that option before this project was built (API approval required as of Nov 2025, `.json` endpoints closed May 2026). I ended up collecting manually, which was slower but actually forced me to read each comment carefully before annotating it, which probably helped with label consistency.
+**Where I diverged:** The spec assumes API scraping is the data collection path — the PRAW setup instructions are in the project guide. Reddit killed that option before this project was built (API approval required as of Nov 2025, `.json` endpoints closed May 2026). I ended up collecting manually, which was slower but also forced me to read each comment carefully before labeling it, which probably helped annotation consistency.
 
 ---
 
@@ -222,12 +232,12 @@ The gap between 71% and 90% accuracy isn't really a hyperparameter problem. A 70
 I asked Claude to help design a 4-label taxonomy for r/movies discourse quality. It proposed `Analytical`, `Reactive opinion`, `Hyperbolic/bait`, and `Noise`. The `Reactive opinion` / `Hyperbolic/bait` split relied on intensity judgment, which I knew would be inconsistent. I replaced those two with `hot_take` (any unsupported verdict, mild or extreme) and `reaction` (moment-specific feeling only), making the boundary structural rather than tonal.
 
 **Instance 2 — Error pattern analysis**
-After getting the 9 wrong predictions, I pasted them into Claude and asked it to find common patterns across the failures. It correctly identified the uniform low confidence scores, the `hot_take` default bias, and the evaluative-adjacent language in `noise` errors. It also suggested errors might cluster around short post length — I checked and that didn't hold, since the `analysis` error is one of the longer comments. I used the patterns that held up and discarded the one that didn't.
+After getting the 12 wrong predictions, I pasted them into Claude and asked it to find common patterns. It correctly identified the uniform low confidence scores, the `analysis` default bias, and the comparative language appearing in several `hot_take` errors. It also suggested errors might cluster around comment length — I checked and that didn't hold, since several multi-sentence `hot_take` comments were also wrong. I used the patterns that held up and discarded the one that didn't.
 
 **Instance 3 — Edge case rules**
 I asked Claude to help draft annotation rules for ambiguous cases. It produced 6 draft rules covering sarcasm, embedded jokes, and questions framed as opinions. I modified two: the sarcasm rule now specifies using intended meaning inferred from context (Claude's draft said "literal words"); the opinion-question rule defaults to `hot_take` rather than `reaction` to match the decision procedure ordering. I added two rules independently that Claude didn't surface: one for comments from people who haven't seen the film yet, and one for emoji-only comments (exclude rather than force into `noise`).
 
-All 205 labels were applied manually. No AI assistance was used during annotation.
+All 212 labels were applied manually. No AI assistance was used during annotation.
 
 ---
 
@@ -235,7 +245,7 @@ All 205 labels were applied manually. No AI assistance was used during annotatio
 
 | File | Description |
 |---|---|
-| `comments_labeled.csv` | Annotated dataset (205 examples) |
+| `comments_labeled.csv` | Annotated dataset (212 examples) |
 | `planning.md` | Label definitions, edge case rules, data collection plan, annotation notes |
 | `confusion_matrix.png` | Confusion matrix for the fine-tuned model on the test set |
-| `evaluation_results.json` | Accuracy for both models (baseline: 0.903, fine-tuned: 0.710) |
+| `evaluation_results.json` | Accuracy for both models (baseline: 0.781, fine-tuned: 0.625) |
